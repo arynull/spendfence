@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterator
 
 from .errors import IngestError
 from .ledger import LedgerWriter
@@ -117,7 +117,8 @@ def _pick_ts(payload: dict) -> str | None:
 def _has_usage(payload: dict, prefix: str) -> bool:
     usage = _dig(payload, prefix)
     return isinstance(usage, dict) and (
-        _as_int(usage.get("input_tokens")) is not None or _as_int(usage.get("output_tokens")) is not None
+        _as_int(usage.get("input_tokens")) is not None
+        or _as_int(usage.get("output_tokens")) is not None
     )
 
 
@@ -166,7 +167,9 @@ def parse_claude_code(line: object) -> _Record | None:
     model = _dig(payload, "message.model") or payload.get("model")
     cache_read = _as_int(usage.get("cache_read_input_tokens"))
     cache_write = _as_int(usage.get("cache_creation_input_tokens"))
-    return _build(model, input_tokens, output_tokens, cache_read, cache_write, _pick_ts(payload))
+    return _build(
+        model, input_tokens, output_tokens, cache_read, cache_write, _pick_ts(payload)
+    )
 
 
 def parse_codex(line: object) -> _Record | None:
@@ -186,7 +189,14 @@ def parse_codex(line: object) -> _Record | None:
     if input_tokens is None and output_tokens is None:
         return None
     cache_read = _as_int(usage.get("cached_input_tokens"))
-    return _build(payload.get("model"), input_tokens, output_tokens, cache_read, None, _pick_ts(payload))
+    return _build(
+        payload.get("model"),
+        input_tokens,
+        output_tokens,
+        cache_read,
+        None,
+        _pick_ts(payload),
+    )
 
 
 def parse_generic(line: object, field_map: dict[str, str]) -> _Record | None:
@@ -197,7 +207,9 @@ def parse_generic(line: object, field_map: dict[str, str]) -> _Record | None:
     zero rather than failing, so a minimal map of ``input``/``output`` works.
     """
     if not field_map:
-        raise IngestError("generic format needs a field map, e.g. --map input=usage.in,output=usage.out")
+        raise IngestError(
+            "generic format needs a field map, e.g. --map input=usage.in,output=usage.out"
+        )
     payload = _loads(line)
     if payload is None:
         return None
@@ -225,7 +237,14 @@ def parse_generic(line: object, field_map: dict[str, str]) -> _Record | None:
 
     model_path = field_map.get("model")
     model = _dig(payload, model_path) if model_path else None
-    return _build(model, input_tokens, output_tokens, optional("cache_read"), optional("cache_write"), _pick_ts(payload))
+    return _build(
+        model,
+        input_tokens,
+        output_tokens,
+        optional("cache_read"),
+        optional("cache_write"),
+        _pick_ts(payload),
+    )
 
 
 def detect_shape(line: object) -> str | None:
@@ -257,7 +276,9 @@ def _parse_field_map(spec: str | dict | None) -> dict[str, str]:
         if not item:
             continue
         if "=" not in item:
-            raise IngestError(f"field map entry {item!r} is not in key=path.path form (e.g. input=usage.in)")
+            raise IngestError(
+                f"field map entry {item!r} is not in key=path.path form (e.g. input=usage.in)"
+            )
         key, _, path = item.partition("=")
         key = key.strip()
         path = path.strip()
@@ -265,7 +286,9 @@ def _parse_field_map(spec: str | dict | None) -> dict[str, str]:
             raise IngestError(f"field map entry {item!r} is missing a key or a path")
         mapping[key] = path
     if not mapping:
-        raise IngestError("field map is empty; expected entries like input=usage.in,output=usage.out")
+        raise IngestError(
+            "field map is empty; expected entries like input=usage.in,output=usage.out"
+        )
     return mapping
 
 
@@ -285,16 +308,14 @@ def iter_log_lines(path: str | os.PathLike[str]) -> Iterator[str]:
     """Stream a log file line by line (never loads the whole file)."""
     target = Path(path)
     try:
-        handle = open(target, "r", encoding="utf-8", errors="replace")
+        with open(target, "r", encoding="utf-8", errors="replace") as handle:
+            yield from handle
     except FileNotFoundError:
         raise IngestError(f"log file not found: {target}") from None
     except IsADirectoryError:
         raise IngestError(f"not a file: {target}") from None
     except OSError as exc:
         raise IngestError(f"cannot read log file {target}: {exc.strerror}") from None
-    with handle:
-        for line in handle:
-            yield line
 
 
 def ingest_file(
@@ -328,16 +349,24 @@ def ingest_file(
 
     chosen = (shape or "auto").strip().lower()
     if chosen not in SHAPES:
-        raise IngestError(f"unknown format {shape!r}; choose one of: {', '.join(SHAPES)}")
+        raise IngestError(
+            f"unknown format {shape!r}; choose one of: {', '.join(SHAPES)}"
+        )
     if chosen == "generic" and not field_map:
-        raise IngestError("generic format needs a field map, e.g. --map input=usage.in,output=usage.out")
+        raise IngestError(
+            "generic format needs a field map, e.g. --map input=usage.in,output=usage.out"
+        )
 
     mapping = _parse_field_map(field_map)
     table = load_pricing() if pricing_table is None else pricing_table
     target_ledger = state.ledger_path() if ledger_path is None else ledger_path
 
-    session_label = session if isinstance(session, str) and session.strip() else UNKNOWN_LABEL
-    project_label = project if isinstance(project, str) and project.strip() else UNKNOWN_LABEL
+    session_label = (
+        session if isinstance(session, str) and session.strip() else UNKNOWN_LABEL
+    )
+    project_label = (
+        project if isinstance(project, str) and project.strip() else UNKNOWN_LABEL
+    )
 
     def note(message: str) -> None:
         if errors_out is not None and len(errors_out) < 10:
@@ -401,9 +430,13 @@ def ingest_file(
             cache_read = _count(record, "cache_read")
             cache_write = _count(record, "cache_write")
             stamp = record.get("ts")
-            cost = cost_usd(model, input_tokens, output_tokens, cache_read, cache_write, table=table)
+            cost = cost_usd(
+                model, input_tokens, output_tokens, cache_read, cache_write, table=table
+            )
             writer.append(
-                ts=str(stamp) if isinstance(stamp, str) and stamp.strip() else _utc_now(),
+                ts=str(stamp)
+                if isinstance(stamp, str) and stamp.strip()
+                else _utc_now(),
                 session=session_label,
                 project=project_label,
                 model=model,
@@ -428,13 +461,13 @@ def ingest_file(
 
 __all__ = [
     "DETECT_WINDOW",
-    "SHAPES",
     "EXPECTED_FIELDS",
+    "SHAPES",
     "UNKNOWN_LABEL",
+    "detect_shape",
+    "ingest_file",
+    "iter_log_lines",
     "parse_claude_code",
     "parse_codex",
     "parse_generic",
-    "detect_shape",
-    "iter_log_lines",
-    "ingest_file",
 ]

@@ -20,9 +20,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from decimal import Decimal
+from collections.abc import Iterator
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Iterator
 
 from .errors import LedgerError
 
@@ -69,8 +69,12 @@ def _as_int(value: object, *, field: str) -> int:
         try:
             return int(value.strip())
         except ValueError:
-            raise LedgerError(f"ledger field {field} must be a whole number, got {value!r}") from None
-    raise LedgerError(f"ledger field {field} must be a whole number, got {type(value).__name__}")
+            raise LedgerError(
+                f"ledger field {field} must be a whole number, got {value!r}"
+            ) from None
+    raise LedgerError(
+        f"ledger field {field} must be a whole number, got {type(value).__name__}"
+    )
 
 
 def _as_cost(value: object) -> str:
@@ -83,10 +87,14 @@ def _as_cost(value: object) -> str:
     elif isinstance(value, str):
         try:
             dec = Decimal(value.strip())
-        except Exception:
-            raise LedgerError(f"ledger field cost_usd is not a number: {value!r}") from None
+        except InvalidOperation:
+            raise LedgerError(
+                f"ledger field cost_usd is not a number: {value!r}"
+            ) from None
     else:
-        raise LedgerError(f"ledger field cost_usd must be a number, got {type(value).__name__}")
+        raise LedgerError(
+            f"ledger field cost_usd must be a number, got {type(value).__name__}"
+        )
     if dec < 0:
         raise LedgerError(f"ledger field cost_usd cannot be negative ({dec})")
     return f"{dec.quantize(_COST_QUANT):f}"
@@ -178,7 +186,9 @@ def _tail_record(target: Path) -> dict | None:
             f"the last record in {target} is not valid JSON — run 'spendfence check' before appending"
         ) from None
     if not isinstance(record, dict):
-        raise LedgerError(f"the last record in {target} is not a JSON object — refusing to append")
+        raise LedgerError(
+            f"the last record in {target} is not a JSON object — refusing to append"
+        )
     return record
 
 
@@ -195,14 +205,16 @@ class LedgerWriter:
         self._prev_hash = GENESIS
         self._appended = 0
 
-    def __enter__(self) -> "LedgerWriter":
+    def __enter__(self) -> LedgerWriter:  # noqa: PYI034 -- typing.Self needs 3.11+; we support 3.10 stdlib-only
         tail = _tail_record(self.path)
         if tail is None:
             self._prev_hash = GENESIS
         else:
             last_hash = tail.get("hash")
             if not isinstance(last_hash, str) or not last_hash:
-                raise LedgerError(f"the last record in {self.path} has no hash — run 'spendfence check'")
+                raise LedgerError(
+                    f"the last record in {self.path} has no hash — run 'spendfence check'"
+                )
             self._prev_hash = last_hash
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         self._handle = os.fdopen(fd, "a", encoding="utf-8")
@@ -241,7 +253,19 @@ class LedgerWriter:
         return record
 
 
-def append_record(path: str | os.PathLike[str], *, ts: str, session: str, project: str, model: str, input_tokens: int, output_tokens: int, cache_read: int, cache_write: int, cost_usd: Decimal | str | float) -> dict:
+def append_record(
+    path: str | os.PathLike[str],
+    *,
+    ts: str,
+    session: str,
+    project: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read: int,
+    cache_write: int,
+    cost_usd: Decimal | str | float,
+) -> dict:
     """Append exactly one metered record to ``path``; returns the record."""
     with LedgerWriter(path) as writer:
         return writer.append(
@@ -267,20 +291,19 @@ def iter_records(path: str | os.PathLike[str]) -> Iterator[dict]:
     """
     target = Path(path)
     try:
-        handle = open(target, "r", encoding="utf-8", errors="replace")
+        with open(target, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict):
+                    yield record
     except FileNotFoundError:
         return
-    with handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict):
-                yield record
 
 
 def read_records(path: str | os.PathLike[str]) -> list[dict]:
@@ -303,42 +326,41 @@ def verify(path: str | os.PathLike[str]) -> tuple[bool, int]:
     prev = GENESIS
     index = 0
     try:
-        handle = open(target, "r", encoding="utf-8", errors="replace")
+        with open(target, "r", encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    return False, index
+                if not isinstance(record, dict):
+                    return False, index
+                if any(field not in record for field in PAYLOAD_FIELDS):
+                    return False, index
+                payload = {field: record[field] for field in PAYLOAD_FIELDS}
+                if record.get("prev_hash") != prev:
+                    return False, index
+                if record.get("hash") != record_digest(prev, payload):
+                    return False, index
+                prev = record["hash"]
+                index += 1
     except OSError:
         return False, 0
-    with handle:
-        for raw in handle:
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                return False, index
-            if not isinstance(record, dict):
-                return False, index
-            if any(field not in record for field in PAYLOAD_FIELDS):
-                return False, index
-            payload = {field: record[field] for field in PAYLOAD_FIELDS}
-            if record.get("prev_hash") != prev:
-                return False, index
-            if record.get("hash") != record_digest(prev, payload):
-                return False, index
-            prev = record["hash"]
-            index += 1
     return True, -1
 
 
 __all__ = [
     "GENESIS",
     "PAYLOAD_FIELDS",
-    "canonical_json",
-    "record_digest",
-    "record_cost",
-    "make_payload",
     "LedgerWriter",
     "append_record",
+    "canonical_json",
     "iter_records",
+    "make_payload",
     "read_records",
+    "record_cost",
+    "record_digest",
     "verify",
 ]
