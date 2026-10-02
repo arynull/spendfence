@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src/
+
+  install-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Clean install from source
+        run: |
+          python -m venv /tmp/ci-venv
+          /tmp/ci-venv/bin/pip install --quiet .
+          /tmp/ci-venv/bin/spendfence --version
+      - name: CLI smoke test (ingest / budget / check / status)
+        run: |
+          export SPENDFENCE_DATA_DIR="$(mktemp -d)"
+          S=/tmp/ci-venv/bin/spendfence
+          printf '{"engine":"gpt-4o","usage":{"in":1000,"out":500}}\n' > /tmp/usage.jsonl
+          $S ingest /tmp/usage.jsonl --shape generic \
+            --field-map "input=usage.in,output=usage.out,model=engine" \
+            --session ci --project ci
+          $S budget set --scope global --cap 1000
+          $S check --verbose
+          $S status --project ci
+          echo "smoke OK"
