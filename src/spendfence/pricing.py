@@ -22,7 +22,8 @@ import json
 import os
 import re
 import tempfile
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from collections.abc import Mapping
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 from .errors import PricingError
@@ -176,32 +177,41 @@ def known_models(table: dict[str, dict[str, Decimal]] | None = None) -> list[str
     return sorted(table)
 
 
-def load_pricing(path: str | os.PathLike[str] | None = None) -> dict[str, dict[str, Decimal]]:
-    """Merge the user's pricing file over :data:`DEFAULT_PRICING`.
+def _read_pricing_entries(
+    path: str | os.PathLike[str] | None = None,
+) -> dict[str, dict]:
+    """Read just the model entries the user's pricing file defines.
 
-    Missing file (or an empty one) means "defaults only". A model may override
-    just the fields it cares about; the rest fall back to the default row.
+    Returns ``{}`` for a missing or empty file — no defaults involved. Raises
+    :class:`~spendfence.errors.PricingError` with a one-line message on a file
+    that cannot be understood, rather than falling back to defaults and quietly
+    metering at the wrong price.
     """
     from . import state
 
-    table = default_table()
     pricing_file = Path(path) if path is not None else state.pricing_path()
     if not pricing_file.exists():
-        return table
+        return {}
 
     try:
         raw_text = pricing_file.read_text(encoding="utf-8")
     except OSError as exc:
-        raise PricingError(f"cannot read pricing file {pricing_file}: {exc.strerror}") from None
+        raise PricingError(
+            f"cannot read pricing file {pricing_file}: {exc.strerror}"
+        ) from None
     if not raw_text.strip():
-        return table
+        return {}
 
     try:
         payload = json.loads(raw_text)
     except json.JSONDecodeError as exc:
-        raise PricingError(f"pricing file {pricing_file} is not valid JSON: {exc.msg} (line {exc.lineno})") from None
+        raise PricingError(
+            f"pricing file {pricing_file} is not valid JSON: {exc.msg} (line {exc.lineno})"
+        ) from None
     if not isinstance(payload, dict):
-        raise PricingError(f"pricing file {pricing_file} must contain a JSON object of model names")
+        raise PricingError(
+            f"pricing file {pricing_file} must contain a JSON object of model names"
+        )
 
     # Accept either a bare {model: prices} object or a wrapped {"models": {...}}.
     if isinstance(payload.get("models"), dict):
@@ -210,24 +220,69 @@ def load_pricing(path: str | os.PathLike[str] | None = None) -> dict[str, dict[s
         # Tolerate a {"version": 1, ...} style wrapper by ignoring scalar keys.
         payload = {k: v for k, v in payload.items() if isinstance(v, dict)}
     if not payload:
-        return table
+        return {}
 
     for model, row in payload.items():
         if not isinstance(row, dict):
-            raise PricingError(f"pricing entry for {model!r} must be a JSON object of price fields")
-        merged = dict(table.get(str(model), {field: Decimal(0) for field in PRICE_FIELDS}))
+            raise PricingError(
+                f"pricing entry for {model!r} must be a JSON object of price fields"
+            )
+    return {str(model): row for model, row in payload.items()}
+
+
+def user_overrides(
+    path: str | os.PathLike[str] | None = None,
+) -> dict[str, dict[str, Decimal]]:
+    """Only the models the user has explicitly priced, as Decimal values.
+
+    Lets a caller tell "the shipped default" from "a number someone typed",
+    which is the difference between quietly trusting a price and flagging it.
+    """
+    payload = _read_pricing_entries(path)
+    overrides: dict[str, dict[str, Decimal]] = {}
+    for model, row in payload.items():
+        merged: dict[str, Decimal] = {}
+        for field in PRICE_FIELDS:
+            if field in row:
+                merged[field] = _to_decimal(
+                    row[field], what=f"pricing for {model}: {field}"
+                )
+        overrides[model] = merged
+    return overrides
+
+
+def load_pricing(
+    path: str | os.PathLike[str] | None = None,
+) -> dict[str, dict[str, Decimal]]:
+    """Merge the user's pricing file over :data:`DEFAULT_PRICING`.
+
+    Missing file (or an empty one) means "defaults only". A model may override
+    just the fields it cares about; the rest fall back to the default row.
+    """
+    table = default_table()
+    payload = _read_pricing_entries(path)
+    if not payload:
+        return table
+
+    for model, row in payload.items():
+        # _read_pricing_entries has already checked that row is a dict.
+        merged = dict(table.get(model, {field: Decimal(0) for field in PRICE_FIELDS}))
         for field in PRICE_FIELDS:
             if field not in row:
                 continue
             price = _to_decimal(row[field], what=f"pricing for {model}: {field}")
             if price < 0:
-                raise PricingError(f"pricing for {model}: {field} cannot be negative ({price})")
+                raise PricingError(
+                    f"pricing for {model}: {field} cannot be negative ({price})"
+                )
             merged[field] = price
-        table[str(model)] = merged
+        table[model] = merged
     return table
 
 
-def save_pricing(path: str | os.PathLike[str], table: dict[str, dict[str, object]]) -> None:
+def save_pricing(
+    path: str | os.PathLike[str], table: Mapping[str, Mapping[str, object]]
+) -> None:
     """Write ``table`` to ``path`` as pretty JSON (mode 0o600, atomic replace).
 
     Writes exactly what it is given, so callers that pass only overrides keep
@@ -240,12 +295,16 @@ def save_pricing(path: str | os.PathLike[str], table: dict[str, dict[str, object
         for field, value in row.items():
             dec = _to_decimal(value, what=f"pricing for {model}: {field}")
             if dec < 0:
-                raise PricingError(f"pricing for {model}: {field} cannot be negative ({dec})")
+                raise PricingError(
+                    f"pricing for {model}: {field} cannot be negative ({dec})"
+                )
             payload[str(model)][str(field)] = float(dec)
 
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".pricing-", suffix=".tmp")
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(target.parent), prefix=".pricing-", suffix=".tmp"
+    )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
@@ -322,7 +381,7 @@ def cost_usd(
     Raises :class:`~spendfence.errors.PricingError` naming the model when no
     price is known for it.
     """
-    table = default_table() if table is None else table
+    table = load_pricing() if table is None else table
     key = resolve_model(table, model if isinstance(model, str) else "")
     if key is None:
         shown = model if isinstance(model, str) and model.strip() else DEFAULT_MODEL
@@ -347,7 +406,7 @@ def cost_usd(
     return (total / TOKENS_PER_UNIT).quantize(COST_QUANT, rounding=ROUND_HALF_UP)
 
 
-def format_usd(amount: Decimal | int | float | str, places: int = 2) -> str:
+def format_usd(amount: Decimal | float | str, places: int = 2) -> str:
     """Render a dollar amount with a fixed number of places (no ``$``)."""
     value = _to_decimal(amount, what="amount")
     quant = Decimal(1).scaleb(-places)
@@ -355,17 +414,17 @@ def format_usd(amount: Decimal | int | float | str, places: int = 2) -> str:
 
 
 __all__ = [
-    "PRICE_FIELDS",
     "COST_QUANT",
-    "TOKENS_PER_UNIT",
     "DEFAULT_MODEL",
     "DEFAULT_PRICING",
     "MODEL_ALIASES",
+    "PRICE_FIELDS",
+    "TOKENS_PER_UNIT",
+    "cost_usd",
     "default_table",
+    "format_usd",
     "known_models",
     "load_pricing",
-    "save_pricing",
     "resolve_model",
-    "cost_usd",
-    "format_usd",
+    "save_pricing",
 ]
