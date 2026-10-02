@@ -1,0 +1,26 @@
+# spendfence — files not part of the distribution
+
+# project docs (kept alongside the repo, not published)
+MISSION.md
+RUNBOOK.md
+SPEC.md
+PROGRESS.md
+ERROR_LOG.md
+prompts/
+
+# local test suite (not published)
+tests/
+
+# local secrets and scratch config
+.telegram.env
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+.ruff_cache/
+scratch/
