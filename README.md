@@ -78,7 +78,7 @@ ingested 1 records ($0.218750) from run-42.jsonl
 |---|---|
 | `--session NAME` | Label this session in the ledger. |
 | `--project NAME` | Label this project in the ledger. |
-| `--shape {auto,claude-code,codex,generic}` | Log format. Default `auto`. |
+| `--shape {auto,claude-code,codex,openai,generic}` | Log format. Default `auto`. |
 | `--field-map k=path,...` | Dot-path mapping for `--shape generic`. |
 
 `auto` sniffs the shape from the keys on each line and meters what it finds. If
@@ -88,10 +88,22 @@ field it was looking for rather than writing zeroes:
 ```console
 $ spendfence ingest harness.log
 error: could not read the log format of harness.log: no line in the first 50
-lines carried token usage. Expected message.usage.input_tokens (Claude Code
-shape) or usage.input_tokens (Codex shape). Pass --format generic with --map
-key=dotted.path for any other log shape. Top-level keys seen: cmd, duration.
+lines carried token usage. Expected message.usage.input_tokens (claude-code
+shape), usage.input_tokens (codex shape), usage.prompt_tokens (openai shape).
+Pass --format generic with --map key=dotted.path for any other log shape.
+Top-level keys seen: cmd, duration.
 ```
+
+OpenAI Chat Completions / Responses logs are read as one line per completion:
+
+```json
+{"model":"gpt-4o","usage":{"prompt_tokens":3000,"completion_tokens":400,"prompt_tokens_details":{"cached_tokens":1200}}}
+```
+
+`usage.prompt_tokens` becomes input tokens, `usage.completion_tokens` output
+tokens, and `usage.prompt_tokens_details.cached_tokens` cache reads — priced
+from the cache-read column, like every other shape. `auto` picks this shape up
+on its own; `--shape openai` forces it.
 
 Unparseable lines are counted and reported, not fatal:
 

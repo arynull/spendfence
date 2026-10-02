@@ -1,10 +1,11 @@
 """Parse agent session logs and append metered records to the ledger.
 
-Three shapes are understood out of the box — ``claude-code`` and ``codex`` are
-sniffed from the line's own keys, and ``generic`` is driven by a caller-supplied
-field map. Nothing is guessed: if the first :data:`DETECT_WINDOW` non-blank lines
-match no known shape, ingestion stops with an error naming the field it was
-looking for rather than writing plausible-looking zeroes.
+Four shapes are understood out of the box — ``claude-code``, ``codex`` and
+``openai`` are sniffed from the line's own keys, and ``generic`` is driven by a
+caller-supplied field map. Nothing is guessed: if the first
+:data:`DETECT_WINDOW` non-blank lines match no known shape, ingestion stops with
+an error naming the field it was looking for rather than writing
+plausible-looking zeroes.
 
 Records that cannot be interpreted (a truncated JSON line, a usage block with no
 token counts) are counted as skipped and reported, not fatal. Cost is computed
@@ -29,14 +30,16 @@ from .pricing import DEFAULT_MODEL, cost_usd, load_pricing
 DETECT_WINDOW = 50
 
 #: Shape names accepted by ``ingest_file``.
-SHAPES = ("auto", "claude-code", "codex", "generic")
+SHAPES = ("auto", "claude-code", "codex", "openai", "generic")
 
 #: Default session/project labels when the caller does not name them.
 UNKNOWN_LABEL = "unknown"
 
 #: Text used in errors so the user learns which field was missing.
 EXPECTED_FIELDS = (
-    "message.usage.input_tokens (Claude Code shape) or usage.input_tokens (Codex shape)"
+    "message.usage.input_tokens (claude-code shape), "
+    "usage.input_tokens (codex shape), "
+    "usage.prompt_tokens (openai shape)"
 )
 
 _Record = dict[str, object]
@@ -122,6 +125,12 @@ def _has_usage(payload: dict, prefix: str) -> bool:
     )
 
 
+def _has_any_key(payload: dict, prefix: str, keys: tuple[str, ...]) -> bool:
+    """True when ``prefix`` holds a dict carrying any of ``keys``."""
+    block = _dig(payload, prefix)
+    return isinstance(block, dict) and any(key in block for key in keys)
+
+
 def _build(
     model: object,
     input_tokens: int | None,
@@ -199,6 +208,35 @@ def parse_codex(line: object) -> _Record | None:
     )
 
 
+def parse_openai(line: object) -> _Record | None:
+    """Parse an OpenAI-style line, or return ``None``.
+
+    Expects a top-level ``usage`` with ``prompt_tokens``/``completion_tokens``
+    (plus the optional ``prompt_tokens_details.cached_tokens``) and a top-level
+    ``model``. Cached tokens are billed as cache reads, the same treatment the
+    Codex path gives ``cached_input_tokens``.
+    """
+    payload = _loads(line)
+    if payload is None:
+        return None
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    input_tokens = _as_int(usage.get("prompt_tokens"))
+    output_tokens = _as_int(usage.get("completion_tokens"))
+    if input_tokens is None and output_tokens is None:
+        return None
+    cache_read = _as_int(_dig(usage, "prompt_tokens_details.cached_tokens"))
+    return _build(
+        payload.get("model"),
+        input_tokens,
+        output_tokens,
+        cache_read,
+        None,
+        _pick_ts(payload),
+    )
+
+
 def parse_generic(line: object, field_map: dict[str, str]) -> _Record | None:
     """Parse a line using a caller-supplied dot-path ``field_map``.
 
@@ -250,15 +288,20 @@ def parse_generic(line: object, field_map: dict[str, str]) -> _Record | None:
 def detect_shape(line: object) -> str | None:
     """Identify which known shape ``line`` belongs to, or ``None``.
 
-    Detection is by key presence only: ``message.usage`` means Claude Code, a
-    bare top-level ``usage`` means Codex. Returns ``None`` when neither matches
-    so the caller can keep sniffing or report.
+    Detection is by key presence only: ``message.usage`` means Claude Code; a
+    top-level ``usage`` carrying ``prompt_tokens``/``completion_tokens`` means
+    OpenAI, and the same block with ``input_tokens``/``output_tokens`` means
+    Codex. The OpenAI keys are tested first so a Chat Completions line can never
+    be read by the Codex parser. Returns ``None`` when none matches so the
+    caller can keep sniffing or report.
     """
     payload = _loads(line)
     if payload is None:
         return None
     if _has_usage(payload, "message.usage"):
         return "claude-code"
+    if _has_any_key(payload, "usage", ("prompt_tokens", "completion_tokens")):
+        return "openai"
     if _has_usage(payload, "usage"):
         return "codex"
     return None
@@ -404,6 +447,8 @@ def ingest_file(
                     parser = parse_claude_code
                 elif resolved == "codex":
                     parser = parse_codex
+                elif resolved == "openai":
+                    parser = parse_openai
 
             if parser is None:
                 # Nothing recognized so far. Keep a sample for the error message
@@ -470,4 +515,5 @@ __all__ = [
     "parse_claude_code",
     "parse_codex",
     "parse_generic",
+    "parse_openai",
 ]
