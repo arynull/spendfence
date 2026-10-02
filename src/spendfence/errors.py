@@ -32,9 +32,9 @@ class LedgerError(SpendfenceError):
 
 
 __all__ = [
-    "SpendfenceError",
-    "PricingError",
     "BudgetError",
     "IngestError",
     "LedgerError",
+    "PricingError",
+    "SpendfenceError",
 ]

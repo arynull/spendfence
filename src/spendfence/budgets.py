@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 from .errors import BudgetError
@@ -71,7 +71,9 @@ def normalize_scope(scope: object) -> str:
         raise BudgetError(f"scope is required; choose one of: {', '.join(SCOPES)}")
     cleaned = scope.strip().lower()
     if cleaned not in SCOPES:
-        raise BudgetError(f"unknown scope {scope.strip()!r}; choose one of: {', '.join(SCOPES)}")
+        raise BudgetError(
+            f"unknown scope {scope.strip()!r}; choose one of: {', '.join(SCOPES)}"
+        )
     return cleaned
 
 
@@ -103,13 +105,17 @@ def _validate_cap(cap_usd: object) -> Decimal:
 
 def _validate_warn_pct(warn_pct: object) -> int:
     if isinstance(warn_pct, bool):
-        raise BudgetError(f"warning percentage must be a number between {MIN_WARN_PCT} and {MAX_WARN_PCT_EXCLUSIVE - 1}, got {warn_pct!r}")
+        raise BudgetError(
+            f"warning percentage must be a number between {MIN_WARN_PCT} and {MAX_WARN_PCT_EXCLUSIVE - 1}, got {warn_pct!r}"
+        )
     if isinstance(warn_pct, float) and not warn_pct.is_integer():
         raise BudgetError(f"warning percentage must be a whole number, got {warn_pct}")
     try:
         pct = int(warn_pct)  # type: ignore[arg-type]
     except (TypeError, ValueError):
-        raise BudgetError(f"warning percentage must be a whole number, got {warn_pct!r}") from None
+        raise BudgetError(
+            f"warning percentage must be a whole number, got {warn_pct!r}"
+        ) from None
     if pct < MIN_WARN_PCT or pct >= MAX_WARN_PCT_EXCLUSIVE:
         raise BudgetError(
             f"warning percentage must be between {MIN_WARN_PCT} and {MAX_WARN_PCT_EXCLUSIVE - 1}, got {pct}"
@@ -125,13 +131,17 @@ def _load(path: str | os.PathLike[str]) -> list[dict]:
     try:
         raw = target.read_text(encoding="utf-8")
     except OSError as exc:
-        raise BudgetError(f"cannot read budgets file {target}: {exc.strerror}") from None
+        raise BudgetError(
+            f"cannot read budgets file {target}: {exc.strerror}"
+        ) from None
     if not raw.strip():
         return []
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise BudgetError(f"budgets file {target} is not valid JSON: {exc.msg} (line {exc.lineno})") from None
+        raise BudgetError(
+            f"budgets file {target} is not valid JSON: {exc.msg} (line {exc.lineno})"
+        ) from None
 
     rows: object
     if isinstance(payload, dict):
@@ -139,14 +149,20 @@ def _load(path: str | os.PathLike[str]) -> list[dict]:
     elif isinstance(payload, list):
         rows = payload
     else:
-        raise BudgetError(f"budgets file {target} must contain a JSON object with a 'budgets' list")
+        raise BudgetError(
+            f"budgets file {target} must contain a JSON object with a 'budgets' list"
+        )
     if not isinstance(rows, list):
-        raise BudgetError(f"budgets file {target} has a 'budgets' entry that is not a list")
+        raise BudgetError(
+            f"budgets file {target} has a 'budgets' entry that is not a list"
+        )
 
     parsed: list[dict] = []
     for row in rows:
         if not isinstance(row, dict):
-            raise BudgetError(f"budgets file {target} contains an entry that is not a JSON object")
+            raise BudgetError(
+                f"budgets file {target} contains an entry that is not a JSON object"
+            )
         scope = normalize_scope(row.get("scope"))
         key = normalize_key(scope, row.get("key", GLOBAL_KEY))
         parsed.append(
@@ -182,7 +198,9 @@ def _save(path: str | os.PathLike[str], budgets: list[dict]) -> None:
         ],
     }
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".budgets-", suffix=".tmp")
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(target.parent), prefix=".budgets-", suffix=".tmp"
+    )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
@@ -200,7 +218,7 @@ def set_budget(
     path: str | os.PathLike[str],
     scope: str,
     key: str | None,
-    cap_usd: Decimal | float | int | str,
+    cap_usd: Decimal | float | str,
     warn_pct: int = DEFAULT_WARN_PCT,
 ) -> dict:
     """Create or replace the budget for ``(scope, key)``.
@@ -213,7 +231,11 @@ def set_budget(
     cap = _validate_cap(cap_usd)
     warn = _validate_warn_pct(warn_pct)
 
-    budgets = [b for b in _load(path) if not (b["scope"] == clean_scope and b["key"] == clean_key)]
+    budgets = [
+        b
+        for b in _load(path)
+        if not (b["scope"] == clean_scope and b["key"] == clean_key)
+    ]
     budget = {"scope": clean_scope, "key": clean_key, "cap_usd": cap, "warn_pct": warn}
     budgets.append(budget)
     _save(path, budgets)
@@ -229,10 +251,14 @@ def remove_budget(path: str | os.PathLike[str], scope: str, key: str | None) -> 
     clean_scope = normalize_scope(scope)
     clean_key = normalize_key(clean_scope, key)
     budgets = _load(path)
-    remaining = [b for b in budgets if not (b["scope"] == clean_scope and b["key"] == clean_key)]
+    remaining = [
+        b for b in budgets if not (b["scope"] == clean_scope and b["key"] == clean_key)
+    ]
     if len(remaining) == len(budgets):
         label = clean_key or clean_scope
-        raise BudgetError(f"no {clean_scope} budget found for {label!r}; nothing to remove")
+        raise BudgetError(
+            f"no {clean_scope} budget found for {label!r}; nothing to remove"
+        )
     _save(path, remaining)
     return True
 
@@ -263,16 +289,16 @@ def find_budget(budgets: list[dict], scope: str, key: str | None = None) -> dict
 
 
 __all__ = [
-    "SCOPES",
-    "KEYED_SCOPES",
     "DEFAULT_WARN_PCT",
-    "MIN_WARN_PCT",
-    "MAX_WARN_PCT_EXCLUSIVE",
     "GLOBAL_KEY",
-    "normalize_scope",
-    "normalize_key",
-    "set_budget",
-    "remove_budget",
-    "list_budgets",
+    "KEYED_SCOPES",
+    "MAX_WARN_PCT_EXCLUSIVE",
+    "MIN_WARN_PCT",
+    "SCOPES",
     "find_budget",
+    "list_budgets",
+    "normalize_key",
+    "normalize_scope",
+    "remove_budget",
+    "set_budget",
 ]
