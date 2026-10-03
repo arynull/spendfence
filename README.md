@@ -308,11 +308,44 @@ $ spendfence resume
 kill switch cleared
 ```
 
+### `spendfence verify`
+
+Asks "is the ledger intact?" — it checks the hash chain and then validates
+every record's schema. `check` also verifies the chain before trusting any
+total, but `verify` is the explicit integrity report.
+
+```console
+$ spendfence verify
+ledger intact: 913 records, head 9f2c…
+
+$ spendfence verify --format json
+{
+  "failures": [],
+  "head": "9f2c…",
+  "intact": true,
+  "records": 913
+}
+```
+
+A broken chain or a bad record exits 3:
+
+```console
+$ spendfence verify
+LEDGER TAMPER DETECTED at record 3
+$ echo $?
+3
+```
+
+The detail line goes to stderr, e.g. `record 3: hash chain broken at this
+record` for a chain break or `record 5: field 'input_tokens' is negative` for
+a schema failure. In `--format json` mode stdout stays pure JSON and the
+one-line summary moves to stderr.
+
 ### `spendfence --version`
 
 ```console
 $ spendfence --version
-spendfence 0.1.0
+spendfence 0.1.2
 ```
 
 ## Exit codes
@@ -322,7 +355,7 @@ spendfence 0.1.0
 | 0 | Success. A budget *warning* is still success. |
 | 1 | Usage error, or a failure while reading or writing state. |
 | 2 | `check` only: a cap was breached, or the kill switch is engaged. |
-| 3 | The ledger's hash chain does not verify. |
+| 3 | The ledger fails integrity: hash chain broken or record schema invalid (`check` and `verify` can both produce it). |
 
 Warnings and failures go to stderr; everything a script might parse goes to
 stdout. Errors are always a single plain-language line — never a traceback.
@@ -339,7 +372,8 @@ Everything lives in one directory: `$SPENDFENCE_DATA_DIR` when set, otherwise
 ### `ledger.jsonl`
 
 Append-only, one JSON object per line, hash-chained so any edit breaks every
-line after it. `spendfence check` verifies the chain and exits 3 at the first
+line after it. `spendfence verify` is the explicit way to ask "is the ledger
+intact?"; `spendfence check` also verifies the chain and exits 3 at the first
 record that does not verify.
 
 ```json

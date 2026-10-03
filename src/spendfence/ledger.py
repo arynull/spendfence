@@ -131,6 +131,32 @@ def record_cost(record: dict) -> Decimal:
     return Decimal(str(record.get("cost_usd", "0")))
 
 
+def validate_record(record: dict) -> list[str]:
+    """Check one ledger record's schema; returns a list of human-readable reasons (empty = valid)."""
+    reasons: list[str] = []
+    for field in PAYLOAD_FIELDS:
+        if field not in record:
+            reasons.append(f"missing field '{field}'")
+    for name in ("input_tokens", "output_tokens", "cache_read", "cache_write"):
+        if name not in record:
+            continue
+        try:
+            value = _as_int(record[name], field=name)
+        except LedgerError as exc:
+            reasons.append(str(exc))
+            continue
+        if value < 0:
+            reasons.append(f"field '{name}' is negative")
+    if "cost_usd" not in record:
+        pass
+    else:
+        try:
+            _as_cost(record["cost_usd"])
+        except LedgerError as exc:
+            reasons.append(str(exc))
+    return reasons
+
+
 def _prepare(path: str | os.PathLike[str]) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
@@ -362,5 +388,6 @@ __all__ = [
     "read_records",
     "record_cost",
     "record_digest",
+    "validate_record",
     "verify",
 ]

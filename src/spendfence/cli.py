@@ -724,6 +724,56 @@ def cmd_resume(_args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    ledger_file = state.ledger_path()
+    intact, index = ledger_mod.verify(ledger_file)
+    failures: list[dict] = []
+    records: list[dict] = []
+    if not intact:
+        failures.append(
+            {"record": index + 1, "reason": "hash chain broken at this record"}
+        )
+        try:
+            records = ledger_mod.read_records(ledger_file)
+        except OSError:
+            records = []
+    else:
+        records = ledger_mod.read_records(ledger_file)
+        for number, record in enumerate(records, start=1):
+            reasons = ledger_mod.validate_record(record)
+            if reasons:
+                failures.append({"record": number, "reason": reasons[0]})
+    head: str | None = None
+    if records:
+        last_hash = records[-1].get("hash")
+        if isinstance(last_hash, str) and last_hash:
+            head = last_hash
+    is_json = getattr(args, "format", "human") == "json"
+    if is_json:
+        payload = {
+            "failures": failures,
+            "head": head,
+            "intact": not failures,
+            "records": len(records),
+        }
+        _out(json.dumps(payload, indent=2, sort_keys=True))
+        if failures:
+            _err(f"LEDGER TAMPER DETECTED at record {failures[0]['record']}")
+        return EXIT_OK if not failures else EXIT_TAMPER
+    if not failures:
+        if not records:
+            _out("ledger intact: 0 records")
+        elif head is None:
+            _out(f"ledger intact: {len(records)} records")
+        else:
+            _out(f"ledger intact: {len(records)} records, head {head[:8]}")
+        return EXIT_OK
+    _out(f"LEDGER TAMPER DETECTED at record {failures[0]['record']}")
+    for failure in failures:
+        _err(f"record {failure['record']}: {failure['reason']}")
+    return EXIT_TAMPER
+
+
 # --------------------------------------------------------------------------
 # Argument parsing
 # --------------------------------------------------------------------------
@@ -853,6 +903,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("resume", help="clear the kill switch").set_defaults(
         func=cmd_resume
     )
+
+    verify_parser = subparsers.add_parser("verify", help="verify ledger integrity")
+    verify_parser.add_argument("--format", choices=("human", "json"), default="human")
+    verify_parser.set_defaults(func=cmd_verify)
 
     return parser
 
