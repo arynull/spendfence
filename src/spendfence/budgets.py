@@ -1,9 +1,10 @@
-"""Budget definitions: per-session, per-project, per-day, and overall caps.
+"""Budget definitions: per-session, per-project, per-day, per-week, and overall caps.
 
 A budget is ``{scope, key, cap_usd, warn_pct}``:
 
-* ``session`` / ``project`` / ``day`` — ``key`` identifies the session id, the
-  project name, or the calendar day (``YYYY-MM-DD``), respectively.
+* ``session`` / ``project`` / ``day`` / ``week`` — ``key`` identifies the session id, the
+  project name, the calendar day (``YYYY-MM-DD``), or the ISO week (``YYYY-Www``),
+  respectively.
 * ``global`` — one machine-wide cap; ``key`` is ignored and stored as ``""``.
 
 ``warn_pct`` is where the CLI starts complaining on stderr (default 80). The cap
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
@@ -26,10 +28,10 @@ from pathlib import Path
 from .errors import BudgetError
 
 #: Scope names accepted by the CLI, in display order.
-SCOPES = ("session", "project", "day", "global")
+SCOPES = ("session", "project", "day", "week", "global")
 
 #: Scopes whose ``key`` selects which bucket is being capped.
-KEYED_SCOPES = ("session", "project", "day")
+KEYED_SCOPES = ("session", "project", "day", "week")
 
 DEFAULT_WARN_PCT = 80
 MIN_WARN_PCT = 1
@@ -42,6 +44,8 @@ _VERSION = 1
 
 #: Key stored for ``global`` budgets, which ignore any key the user passed.
 GLOBAL_KEY = ""
+
+_WEEK_RE = re.compile(r"^\d{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$")
 
 
 def _to_decimal(value: object, *, what: str) -> Decimal:
@@ -77,6 +81,12 @@ def normalize_scope(scope: object) -> str:
     return cleaned
 
 
+def _validate_week_key(key: object) -> str:
+    if isinstance(key, str) and _WEEK_RE.match(key.strip()):
+        return key.strip()
+    raise BudgetError(f"a week budget needs an ISO week key like 2026-W41, got {key!r}")
+
+
 def normalize_key(scope: str, key: object) -> str:
     """Return the stored key for ``scope``.
 
@@ -85,9 +95,11 @@ def normalize_key(scope: str, key: object) -> str:
     """
     if scope == "global":
         return GLOBAL_KEY
+    if scope == "week":
+        return _validate_week_key(key)
     if key is None or (isinstance(key, str) and not key.strip()):
         raise BudgetError(
-            f"a {scope} budget needs a key (the session id, project name, or day as YYYY-MM-DD); "
+            f"a {scope} budget needs a key (the session id, project name, day as YYYY-MM-DD, or week as YYYY-Www); "
             "only the global scope can omit it"
         )
     return str(key).strip()

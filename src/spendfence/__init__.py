@@ -5,6 +5,6 @@ The package is deliberately import-light: submodules are imported explicitly
 modules it does not touch.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = ["__version__"]

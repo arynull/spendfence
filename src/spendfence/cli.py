@@ -175,6 +175,15 @@ def _day_of(record: dict) -> str | None:
     return stamp.strftime("%Y-%m-%d") if stamp else None
 
 
+def _week_of(record: dict) -> str | None:
+    """The UTC ISO week (``YYYY-Www``) a record belongs to."""
+    stamp = _parse_ts(record.get("ts"))
+    if stamp is None:
+        return None
+    iso = stamp.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
 def _sum_cost(records) -> Decimal:
     total = Decimal(0)
     for record in records:
@@ -235,13 +244,15 @@ def _applicable_budgets(
     session: str | None,
     project: str | None,
     today: str,
+    this_week: str,
     records: list[dict],
 ) -> list[tuple[dict, Decimal]]:
     """Pair each budget that applies here with its spend.
 
     A budget is skipped when it cannot be evaluated: a session budget with no
-    ``--session`` given, or a day budget for a date other than today (you
-    cannot retroactively breach yesterday's cap).
+    ``--session`` given, a day budget for a date other than today, or a week
+    budget for a week other than this week (you cannot retroactively breach
+    yesterday's cap).
     """
     pairs: list[tuple[dict, Decimal]] = []
     for budget in configured:
@@ -259,6 +270,10 @@ def _applicable_budgets(
             if key != today:
                 continue
             spend = _sum_cost(r for r in records if _day_of(r) == today)
+        elif scope == "week":
+            if key != this_week:
+                continue
+            spend = _sum_cost(r for r in records if _week_of(r) == this_week)
         else:
             spend = _sum_cost(records)
         pairs.append((budget, spend))
@@ -373,12 +388,16 @@ def cmd_check(args: argparse.Namespace) -> int:
         return EXIT_BREACH
 
     configured = budgets_mod.list_budgets(state.budgets_path())
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    iso = now.isocalendar()
+    this_week = f"{iso.year}-W{iso.week:02d}"
     pairs = _applicable_budgets(
         configured,
         session=args.session,
         project=args.project,
         today=today,
+        this_week=this_week,
         records=records,
     )
 
@@ -421,14 +440,22 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     records = _read_ledger(verify=True)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    iso = now.isocalendar()
+    this_week = f"{iso.year}-W{iso.week:02d}"
 
     # status always shows the global picture, using defaults when nothing was named.
     session = args.session
     project = args.project
     configured = budgets_mod.list_budgets(state.budgets_path())
     pairs = _applicable_budgets(
-        configured, session=session, project=project, today=today, records=records
+        configured,
+        session=session,
+        project=project,
+        today=today,
+        this_week=this_week,
+        records=records,
     )
     if not pairs and configured:
         _err("note: no configured budget applies here (pass --session / --project)")
@@ -829,7 +856,7 @@ def build_parser() -> argparse.ArgumentParser:
     set_parser.add_argument(
         "--key",
         default=None,
-        help="session id, project name, or YYYY-MM-DD (not for global)",
+        help="session id, project name, YYYY-MM-DD, or YYYY-Www week (not for global)",
     )
     set_parser.add_argument("--cap", required=True, help="dollar cap, e.g. 25.00")
     set_parser.add_argument(
