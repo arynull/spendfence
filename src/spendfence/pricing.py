@@ -53,6 +53,8 @@ _FILE_MODE = 0o600
 # input to write it; OpenAI-style tables read cached input at ~0.5x input and
 # charge input price to write; vendors without cache pricing reuse the input
 # price so the math stays conservative (over-reporting beats under-reporting).
+# Haiku 5.5 row is the <=100k-prompt tier (~90% of requests); prompts over
+# 100k bill 5x (0.50/2.50/0.05/0.625) — set locally via `models set`.
 # --------------------------------------------------------------------------
 DEFAULT_PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4": {
@@ -114,6 +116,42 @@ DEFAULT_PRICING: dict[str, dict[str, float]] = {
         "output_per_1m": 10.00,
         "cache_read_per_1m": 2.00,
         "cache_write_per_1m": 2.00,
+    },
+    "claude-opus-5.5": {
+        "input_per_1m": 4.00,
+        "output_per_1m": 20.00,
+        "cache_read_per_1m": 0.20,
+        "cache_write_per_1m": 5.00,
+    },
+    "claude-sonnet-5.5": {
+        "input_per_1m": 2.00,
+        "output_per_1m": 10.00,
+        "cache_read_per_1m": 0.10,
+        "cache_write_per_1m": 2.50,
+    },
+    "claude-haiku-5.5": {
+        "input_per_1m": 0.10,
+        "output_per_1m": 0.50,
+        "cache_read_per_1m": 0.01,
+        "cache_write_per_1m": 0.125,
+    },
+    "claude-fable-5.1": {
+        "input_per_1m": 10.00,
+        "output_per_1m": 50.00,
+        "cache_read_per_1m": 0.25,
+        "cache_write_per_1m": 12.50,
+    },
+    "gpt-6.1-sol-ultrafast": {
+        "input_per_1m": 12.00,
+        "output_per_1m": 60.00,
+        "cache_read_per_1m": 0.60,
+        "cache_write_per_1m": 12.00,
+    },
+    "gpt-6-luna-decisions": {
+        "input_per_1m": 0.10,
+        "output_per_1m": 0.00,
+        "cache_read_per_1m": 0.00,
+        "cache_write_per_1m": 0.00,
     },
 }
 

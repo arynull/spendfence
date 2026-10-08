@@ -260,7 +260,7 @@ claude-opus-4             15.00      75.00
 claude-sonnet-4            3.00      15.00      0.30      3.75
 gpt-4o*                    2.50      10.00      1.25      2.50
 
-* = locally set   (shipped prices are estimates — check them against your provider)
+* = locally set   (shipped prices are estimates — check them against your provider; new rows: claude-opus-5.5, claude-sonnet-5.5, claude-haiku-5.5, claude-fable-5.1, gpt-6.1-sol-ultrafast, gpt-6-luna-decisions; claude-haiku-5.5 row is the ≤100k-prompt tier (~90% of requests) — prompts over 100k tokens bill 5× (0.50/2.50/0.05/0.625), set locally via `models set`)
 ```
 
 ```console
