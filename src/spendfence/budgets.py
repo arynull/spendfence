@@ -1,10 +1,11 @@
-"""Budget definitions: per-session, per-project, per-day, per-week, and overall caps.
+"""Budget definitions: per-session, per-project, per-day, per-week, per-month, and overall caps.
 
 A budget is ``{scope, key, cap_usd, warn_pct}``:
 
 * ``session`` / ``project`` / ``day`` / ``week`` — ``key`` identifies the session id, the
   project name, the calendar day (``YYYY-MM-DD``), or the ISO week (``YYYY-Www``),
   respectively.
+* ``month`` — ``key`` is the UTC calendar month (``YYYY-MM``, e.g. ``2026-10``).
 * ``global`` — one machine-wide cap; ``key`` is ignored and stored as ``""``.
 
 ``warn_pct`` is where the CLI starts complaining on stderr (default 80). The cap
@@ -28,10 +29,10 @@ from pathlib import Path
 from .errors import BudgetError
 
 #: Scope names accepted by the CLI, in display order.
-SCOPES = ("session", "project", "day", "week", "global")
+SCOPES = ("session", "project", "day", "week", "month", "global")
 
 #: Scopes whose ``key`` selects which bucket is being capped.
-KEYED_SCOPES = ("session", "project", "day", "week")
+KEYED_SCOPES = ("session", "project", "day", "week", "month")
 
 DEFAULT_WARN_PCT = 80
 MIN_WARN_PCT = 1
@@ -46,6 +47,7 @@ _VERSION = 1
 GLOBAL_KEY = ""
 
 _WEEK_RE = re.compile(r"^\d{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$")
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 def _to_decimal(value: object, *, what: str) -> Decimal:
@@ -87,6 +89,12 @@ def _validate_week_key(key: object) -> str:
     raise BudgetError(f"a week budget needs an ISO week key like 2026-W41, got {key!r}")
 
 
+def _validate_month_key(key: object) -> str:
+    if isinstance(key, str) and _MONTH_RE.match(key.strip()):
+        return key.strip()
+    raise BudgetError(f"a month budget needs a month key like 2026-10, got {key!r}")
+
+
 def normalize_key(scope: str, key: object) -> str:
     """Return the stored key for ``scope``.
 
@@ -97,9 +105,11 @@ def normalize_key(scope: str, key: object) -> str:
         return GLOBAL_KEY
     if scope == "week":
         return _validate_week_key(key)
+    if scope == "month":
+        return _validate_month_key(key)
     if key is None or (isinstance(key, str) and not key.strip()):
         raise BudgetError(
-            f"a {scope} budget needs a key (the session id, project name, day as YYYY-MM-DD, or week as YYYY-Www); "
+            f"a {scope} budget needs a key (the session id, project name, day as YYYY-MM-DD, week as YYYY-Www, or month as YYYY-MM); "
             "only the global scope can omit it"
         )
     return str(key).strip()

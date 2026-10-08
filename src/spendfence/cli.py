@@ -184,6 +184,12 @@ def _week_of(record: dict) -> str | None:
     return f"{iso.year}-W{iso.week:02d}"
 
 
+def _month_of(record: dict) -> str | None:
+    """The UTC calendar month (``YYYY-MM``) a record belongs to."""
+    stamp = _parse_ts(record.get("ts"))
+    return stamp.strftime("%Y-%m") if stamp else None
+
+
 def _sum_cost(records) -> Decimal:
     total = Decimal(0)
     for record in records:
@@ -245,14 +251,14 @@ def _applicable_budgets(
     project: str | None,
     today: str,
     this_week: str,
+    this_month: str | None = None,
     records: list[dict],
 ) -> list[tuple[dict, Decimal]]:
     """Pair each budget that applies here with its spend.
 
     A budget is skipped when it cannot be evaluated: a session budget with no
-    ``--session`` given, a day budget for a date other than today, or a week
-    budget for a week other than this week (you cannot retroactively breach
-    yesterday's cap).
+    ``--session`` given, a day budget for a date other than today, a week
+    budget for a week other than this week, or a month budget for a month other than this month (you cannot retroactively breach yesterday's cap).
     """
     pairs: list[tuple[dict, Decimal]] = []
     for budget in configured:
@@ -274,6 +280,10 @@ def _applicable_budgets(
             if key != this_week:
                 continue
             spend = _sum_cost(r for r in records if _week_of(r) == this_week)
+        elif scope == "month":
+            if key != this_month:
+                continue
+            spend = _sum_cost(r for r in records if _month_of(r) == this_month)
         else:
             spend = _sum_cost(records)
         pairs.append((budget, spend))
@@ -392,12 +402,14 @@ def cmd_check(args: argparse.Namespace) -> int:
     today = now.strftime("%Y-%m-%d")
     iso = now.isocalendar()
     this_week = f"{iso.year}-W{iso.week:02d}"
+    this_month = now.strftime("%Y-%m")
     pairs = _applicable_budgets(
         configured,
         session=args.session,
         project=args.project,
         today=today,
         this_week=this_week,
+        this_month=this_month,
         records=records,
     )
 
@@ -444,6 +456,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     today = now.strftime("%Y-%m-%d")
     iso = now.isocalendar()
     this_week = f"{iso.year}-W{iso.week:02d}"
+    this_month = now.strftime("%Y-%m")
 
     # status always shows the global picture, using defaults when nothing was named.
     session = args.session
@@ -455,6 +468,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         project=project,
         today=today,
         this_week=this_week,
+        this_month=this_month,
         records=records,
     )
     if not pairs and configured:
@@ -856,7 +870,7 @@ def build_parser() -> argparse.ArgumentParser:
     set_parser.add_argument(
         "--key",
         default=None,
-        help="session id, project name, YYYY-MM-DD, or YYYY-Www week (not for global)",
+        help="session id, project name, YYYY-MM-DD, YYYY-Www week, or YYYY-MM month (not for global)",
     )
     set_parser.add_argument("--cap", required=True, help="dollar cap, e.g. 25.00")
     set_parser.add_argument(

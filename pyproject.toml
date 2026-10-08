@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spendfence"
-version = "0.1.3"
+version = "0.1.4"
 description = "Offline token-spend metering and dollar budget enforcement for coding-agent sessions."
 requires-python = ">=3.10"
 license = { file = "LICENSE" }

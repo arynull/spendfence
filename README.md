@@ -4,7 +4,7 @@ spendfence meters token spend from JSONL session logs into a local, hash-chained
 ledger and enforces dollar caps on that spend. It answers one question — *how
 much has this session or project cost, and should it keep running?* — and it
 answers it entirely offline, from logs already on your disk. Caps can be enforced
-per session, per project, per day, per week, or globally; `spendfence check` is a
+per session, per project, per day, per week, per month, or globally; `spendfence check` is a
 non-zero-exit gate you can put in front of a job or in CI.
 
 It never makes a network request, never phones home, and never runs the code it
@@ -137,15 +137,21 @@ $ spendfence budget remove --scope project --key web
 budget removed: project:web
 ```
 
-`--scope` is `session`, `project`, `day`, `week`, or `global`. `--key` is required
-except for `global` — a `day` budget's key is the UTC date, `YYYY-MM-DD`, and a
-`week` budget's key is the UTC ISO week, `YYYY-Www` (e.g. `2026-W41`). A
+`--scope` is `session`, `project`, `day`, `week`, `month`, or `global`. `--key` is required
+except for `global` — a `day` budget's key is the UTC date, `YYYY-MM-DD`, a
+`week` budget's key is the UTC ISO week, `YYYY-Www` (e.g. `2026-W41`), and a
+`month` budget's key is the UTC calendar month, `YYYY-MM` (e.g. `2026-10`). A
 global budget ignores its key entirely, so there is only ever one. Caps must be
 at least `$0.01`; `--warn-pct` is an integer from 1 to 99.
 
 ```console
 $ spendfence budget set --scope week --key 2026-W41 --cap 50.00
 budget set: week:2026-W41 cap $50.00 (warn at 80%)
+```
+
+```console
+$ spendfence budget set --scope month --key 2026-10 --cap 200.00
+budget set: month:2026-10 cap $200.00 (warn at 80%)
 ```
 
 ### `spendfence check`
@@ -351,7 +357,7 @@ one-line summary moves to stderr.
 
 ```console
 $ spendfence --version
-spendfence 0.1.3
+spendfence 0.1.4
 ```
 
 ## Exit codes
