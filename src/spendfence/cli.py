@@ -545,18 +545,15 @@ def cmd_report(args: argparse.Namespace) -> int:
         by_day[day] = by_day.get(day, Decimal(0)) + cost
 
     total = _sum_cost(records)
+    top = args.top
+    if top is not None and top < 1:
+        raise SpendfenceError(f"--top must be a positive integer (got {top})")
 
     if args.format == "json":
         payload = {
             "total_usd": _round_float(total),
-            "by_session": {
-                k: _round_float(v)
-                for k, v in sorted(by_session.items(), key=lambda kv: (-kv[1], kv[0]))
-            },
-            "by_model": {
-                k: _round_float(v)
-                for k, v in sorted(by_model.items(), key=lambda kv: (-kv[1], kv[0]))
-            },
+            "by_session": _limited_sorted(by_session, top),
+            "by_model": _limited_sorted(by_model, top),
             "by_day": {k: _round_float(v) for k, v in sorted(by_day.items())},
         }
         _out(json.dumps(payload, indent=2, sort_keys=True))
@@ -567,21 +564,8 @@ def cmd_report(args: argparse.Namespace) -> int:
     _out(f"spend report — {scope} — last {window}")
     _out(f"total: ${_usd(total, 6)}  across {len(records)} record(s)")
 
-    _out("")
-    _out("top sessions")
-    _out(f"  {'SESSION':<28} {'SPEND':>12}")
-    for name, spend in list(_sorted_desc(by_session).items())[:5]:
-        _out(f"  {name:<28} {'$' + _usd(spend):>12}")
-    if not by_session:
-        _out("  (none)")
-
-    _out("")
-    _out("top models")
-    _out(f"  {'MODEL':<28} {'SPEND':>12}")
-    for name, spend in list(_sorted_desc(by_model).items())[:5]:
-        _out(f"  {name:<28} {'$' + _usd(spend):>12}")
-    if not by_model:
-        _out("  (none)")
+    _print_attribution("top sessions", "SESSION", by_session, top)
+    _print_attribution("top models", "MODEL", by_model, top)
 
     _out("")
     _out("daily spend")
@@ -597,6 +581,38 @@ def cmd_report(args: argparse.Namespace) -> int:
 def _sorted_desc(mapping: dict[str, Decimal]) -> dict[str, Decimal]:
     """Highest spend first; ties broken by name so output is reproducible."""
     return dict(sorted(mapping.items(), key=lambda kv: (-kv[1], kv[0])))
+
+def _limited_sorted(mapping: dict[str, Decimal], limit: int | None) -> dict[str, float]:
+    """Highest-spend-first rows as JSON floats, truncated to ``limit`` when set."""
+    rows = list(_sorted_desc(mapping).items())
+    if limit is not None:
+        rows = rows[:limit]
+    return {k: _round_float(v) for k, v in rows}
+
+def _print_attribution(
+    title: str,
+    column: str,
+    mapping: dict[str, Decimal],
+    limit: int | None,
+) -> None:
+    """One ranked attribution table: header, top rows, then a TOTAL footer.
+
+    ``limit`` caps the rows shown; TOTAL always sums *every* row in ``mapping``
+    so a truncated table never hides the real spend.
+    """
+    _out("")
+    _out(title)
+    _out(f"  {column:<28} {'SPEND':>12}")
+    if not mapping:
+        _out("  (none)")
+        return
+    rows = list(_sorted_desc(mapping).items())
+    if limit is not None:
+        rows = rows[:limit]
+    for name, spend in rows:
+        _out(f"  {name:<28} {'$' + _usd(spend):>12}")
+    total = sum(mapping.values(), Decimal(0))
+    _out(f"  {'TOTAL':<28} {'$' + _usd(total):>12}")
 
 
 def _round_float(amount: Decimal) -> float:
@@ -912,6 +928,12 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--project", default=None)
     report_parser.add_argument(
         "--since", default=None, help="24h, 7d, 30d (default: all time)"
+    )
+    report_parser.add_argument(
+        "--top",
+        type=int,
+        default=None,
+        help="limit sessions/models tables to the top N rows by spend (default: all)",
     )
     report_parser.add_argument("--format", choices=("human", "json"), default="human")
     report_parser.set_defaults(func=cmd_report)

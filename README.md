@@ -218,19 +218,24 @@ top sessions
   SESSION                      SPEND
   nightly-refactor          $12.418500
   pr-review                    $6.994000
+  TOTAL                     $19.412500
 
 top models
   MODEL                        SPEND
   claude-sonnet-4            $12.418500
   gpt-4o-mini                  $6.994000
+  TOTAL                     $19.412500
 
 daily spend
   2026-09-26  [####------]  $4.812500
   2026-09-27  [########--]  $9.100000
 ```
 
-`--since` takes `24h`, `7d`, or `30d` (default: all time). JSON output carries
-every row, not just the top five:
+`--since` takes `24h`, `7d`, or `30d` (default: all time). `--top N` caps the
+`top sessions` and `top models` tables at the N highest-spend rows; the `TOTAL`
+footer always sums every row, not just the rows shown, so a truncated table
+never hides spend. Default is to show every row. JSON output carries every row
+unless `--top` is given, and `total_usd` is always the full sum:
 
 ```console
 $ spendfence report --format json
